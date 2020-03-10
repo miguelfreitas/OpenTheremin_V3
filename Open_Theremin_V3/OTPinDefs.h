@@ -38,9 +38,9 @@
 
 /** Data direction register for DAC serial in. */
 #define MCP_DAC_SDI_DDR  DDRB
-/** Port register for DAC clock. */
+/** Port register for DAC din. */
 #define MCP_DAC_SDI_PORT PORTB
-/** Port bit number for DAC clock. */
+/** Port bit number for DAC din. */
 #define MCP_DAC_SDI_BIT  3
 
 // pin 5 is LDAC if used
