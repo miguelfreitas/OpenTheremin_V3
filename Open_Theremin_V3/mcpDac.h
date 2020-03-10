@@ -26,6 +26,8 @@
 #include <avr/io.h>
 #include "OTPinDefs.h"
 
+// use atmel hardware SPI instead of software bitbanging
+#define USE_HW_SPI
 
 //------------------------------------------------------------------------------
 #define mcpDacCsLow() MCP_DAC_CS_PORT &= ~_BV(MCP_DAC_CS_BIT)
@@ -34,16 +36,27 @@
 #define mcpDac2CsLow() MCP_DAC_CS_PORT &= ~_BV(MCP_DAC2_CS_BIT)
 #define mcpDac2CsHigh() MCP_DAC_CS_PORT |= _BV(MCP_DAC2_CS_BIT)
 
-#define mcpDacSckLow() MCP_DAC_SCK_PORT &= ~_BV(MCP_DAC_SCK_BIT)
-#define mcpDacSckHigh() MCP_DAC_SCK_PORT |= _BV(MCP_DAC_SCK_BIT)
-#define mcpDacSckPulse() {mcpDacSckHigh();mcpDacSckLow();}
+#ifndef USE_HW_SPI
+  #define mcpDacSckLow() MCP_DAC_SCK_PORT &= ~_BV(MCP_DAC_SCK_BIT)
+  #define mcpDacSckHigh() MCP_DAC_SCK_PORT |= _BV(MCP_DAC_SCK_BIT)
+  #define mcpDacSckPulse() {mcpDacSckHigh();mcpDacSckLow();}
 
-#define mcpDacSdiLow() MCP_DAC_SDI_PORT &= ~_BV(MCP_DAC_SDI_BIT)
-#define mcpDacSdiHigh() MCP_DAC_SDI_PORT |= _BV(MCP_DAC_SDI_BIT)
-#define mcpDacSdiSet(v) if(v){mcpDacSdiHigh();}else{mcpDacSdiLow();}
+  #define mcpDacSdiLow() MCP_DAC_SDI_PORT &= ~_BV(MCP_DAC_SDI_BIT)
+  #define mcpDacSdiHigh() MCP_DAC_SDI_PORT |= _BV(MCP_DAC_SDI_BIT)
+  #define mcpDacSdiSet(v) if(v){mcpDacSdiHigh();}else{mcpDacSdiLow();}
 
-// send bit b of d
-#define mcpDacSendBit(d, b) {mcpDacSdiSet(d&_BV(b));mcpDacSckPulse();}
+  // send bit b of d
+  #define mcpDacSendBit(d, b) {mcpDacSdiSet(d&_BV(b));mcpDacSckPulse();}
+#endif
+
+#ifdef USE_MCP_DAC_LDAC
+  #define mcpDacLatchLow() MCP_DAC_LDAC_PORT &= ~_BV(MCP_DAC_LDAC_BIT)
+  #define mcpDacLatchHigh() MCP_DAC_LDAC_PORT |= _BV(MCP_DAC_LDAC_BIT)
+#else
+  #define mcpDacLatchLow()
+  #define mcpDacLatchHigh()
+#endif
+#define mcpDacLatchPulse() {mcpDacLatchLow();mcpDacLatchHigh();}
 
 //------------------------------------------------------------------------------
 // init dac I/O ports
@@ -63,13 +76,29 @@ inline void mcpDacInit(void) {
   MCP_DAC_LDAC_DDR |= _BV(MCP_DAC_LDAC_BIT);
   MCP_DAC_LDAC_PORT &= ~_BV(MCP_DAC_LDAC_BIT);
 #endif // USE_MCP_DAC_LDAC
+
+#ifdef USE_HW_SPI
+  /* Enable SPI, Master, set clock rate fck/4 */
+  SPCR = (1<<SPE)|(1<<MSTR);
+#endif
 }
+
+#ifdef USE_HW_SPI
+inline void mcpSpiWaitDone(void) {
+  while(!(SPSR & (1<<SPIF)))
+    ;
+}
+//extern uint8_t _spi_tmp_8bits;
+#endif
+
 //------------------------------------------------------------------------------
 // send 12 bits to dac
 // trusted compiler to optimize and it does 
 // csLow to csHigh takes 8 - 9 usec on a 16 MHz Arduino
 inline void mcpDacSend(uint16_t data) {
   mcpDacCsLow();
+
+#ifndef USE_HW_SPI
   // send DAC config bits
   mcpDacSdiLow();
   mcpDacSckPulse();  // DAC A
@@ -92,10 +121,23 @@ inline void mcpDacSend(uint16_t data) {
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
   mcpDacCsHigh();
+#else
+  // keep 4 bits (11 to 8) of the MSB
+  // set buffered REF (14), 1x gain (13), no SHDN (12)
+  SPDR = ((data >> 8) & 0x0f) | 0x70;
+  //_spi_tmp_8bits = (data & 0xff);
+
+  mcpSpiWaitDone();
+  SPDR = (data & 0xff);
+  mcpSpiWaitDone();
+  mcpDacCsHigh();
+#endif
 }
 
 inline void mcpDac2ASend(uint16_t data) {
   mcpDac2CsLow();
+
+#ifndef USE_HW_SPI
   // send DAC config bits
   mcpDacSdiLow();
   mcpDacSckPulse();  // DAC A
@@ -117,14 +159,25 @@ inline void mcpDac2ASend(uint16_t data) {
   mcpDacSendBit(data,  2);
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
+#else
+  // keep 4 bits (11 to 8) of the MSB
+  // set buffered DAC=0 (15), REF (14), 1x gain (13), no SHDN (12)
+  SPDR = ((data >> 8) & 0x0f) | 0x70;
+  mcpSpiWaitDone();
+  SPDR = (data & 0xff);
+  mcpSpiWaitDone();
+#endif
+
   mcpDac2CsHigh();
 }
 
 inline void mcpDac2BSend(uint16_t data) {
   mcpDac2CsLow();
+
+#ifndef USE_HW_SPI
   // send DAC config bits
   mcpDacSdiHigh();
-  mcpDacSckPulse();  // DAC A
+  mcpDacSckPulse();  // DAC B
   mcpDacSdiHigh();
   mcpDacSckPulse();  // buffered REF
 
@@ -143,6 +196,15 @@ inline void mcpDac2BSend(uint16_t data) {
   mcpDacSendBit(data,  2);
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
+#else
+  // keep 4 bits (11 to 8) of the MSB
+  // set buffered DAC=1 (15), REF (14), 1x gain (13), no SHDN (12)
+  SPDR = ((data >> 8) & 0x0f) | 0xf0;
+  mcpSpiWaitDone();
+  SPDR = (data & 0xff);
+  mcpSpiWaitDone();
+#endif
+
   mcpDac2CsHigh();
 }
 
