@@ -31,8 +31,8 @@ static const uint32_t MCP_DAC_BASE = 2047;
 #define INT0_STATE    (PIND & (1<<PORTD2))
 #define PC_STATE      (PINB & (1<<PORTB0))
 
-volatile uint8_t  vScaledVolume = 0;
-volatile uint16_t vPointerIncrement = 0;
+uint8_t  vScaledVolume = 0;
+uint16_t vPointerIncrement = 0;
 
 volatile uint16_t pitch = 0;            // Pitch value
 volatile uint16_t pitch_counter = 0;    // Pitch counter
@@ -49,9 +49,9 @@ volatile uint16_t vol_counter_l;         // Last value of volume counter
 
 volatile uint16_t timer_overflow_counter;         // counter for frequency measurement
 
-volatile uint8_t vWavetableSelector = 0;  // wavetable selector
+uint8_t vWavetableSelector = 0;  // wavetable selector
 
-static volatile uint16_t pointer       = 0;  // Table pointer
+static uint16_t pointer       = 0;  // Table pointer
 static volatile uint8_t  debounce_p, debounce_v  = 0;  // Counters for debouncing
 
 void ihInitialiseTimer() {
@@ -131,8 +131,7 @@ ISR (INT1_vect) {
 
 #if CV_ENABLED                                 // Generator for CV output
 
- vPointerIncrement = min(vPointerIncrement, 4095);
- mcpDacSend(vPointerIncrement);        //Send result to Digital to Analogue Converter (audio out) (9.6 us)
+ mcpDacSend(min(vPointerIncrement, 4095));        //Send result to Digital to Analogue Converter (audio out) (9.6 us)
 
 #else   //Play sound
 
@@ -216,5 +215,3 @@ ISR(TIMER1_OVF_vect)
 {
   timer_overflow_counter++;
 }
-
-
