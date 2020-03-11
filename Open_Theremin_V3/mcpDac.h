@@ -28,6 +28,11 @@
 
 // use atmel hardware SPI instead of software bitbanging
 #define USE_HW_SPI
+// use interrupt for sending 8 bits LSB + deasserting CS
+#define USE_SPI_INTERRUPT
+// fake SPI interrupt => must call mcpSpiFirstInt() and mcpSpiSecondInt() explicitely.
+// (avoids interrupt overhead but requires calling things at the right places - hackish!)
+//#define USE_SPI_FAKE_INT
 
 //------------------------------------------------------------------------------
 #define mcpDacCsLow() MCP_DAC_CS_PORT &= ~_BV(MCP_DAC_CS_BIT)
@@ -80,6 +85,7 @@ inline void mcpDacInit(void) {
 #ifdef USE_HW_SPI
   /* Enable SPI, Master, set clock rate fck/4 */
   SPCR = (1<<SPE)|(1<<MSTR);
+  SPSR = 0;
 #endif
 }
 
@@ -88,7 +94,10 @@ inline void mcpSpiWaitDone(void) {
   while(!(SPSR & (1<<SPIF)))
     ;
 }
-//extern uint8_t _spi_tmp_8bits;
+extern uint8_t _mcpDacLSB;
+extern bool _mcpHasDacLSB;
+#define mcpSpiFirstInt() SPDR = _mcpDacLSB
+#define mcpSpiSecondInt() mcpDacCsHigh()
 #endif
 
 //------------------------------------------------------------------------------
@@ -121,17 +130,33 @@ inline void mcpDacSend(uint16_t data) {
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
   mcpDacCsHigh();
-#else
+#else // !USE_HW_SPI
+
+#ifdef USE_SPI_INTERRUPT
+  // load data LSB to buffer so it will be sent from SPI interrupt
+  _mcpDacLSB = (data & 0xff);
+#ifndef USE_SPI_FAKE_INT
+  _mcpHasDacLSB = 1;
+#endif // USE_SPI_FAKE_INT
+#endif // USE_SPI_INTERRUPT
+
   // keep 4 bits (11 to 8) of the MSB
   // set buffered REF (14), 1x gain (13), no SHDN (12)
+  SPSR; // reads SPSR to clear SPIF with next SPDR write
   SPDR = ((data >> 8) & 0x0f) | 0x70;
-  //_spi_tmp_8bits = (data & 0xff);
 
+#ifdef USE_SPI_INTERRUPT
+#ifndef USE_SPI_FAKE_INT
+  SPCR |= (1<<SPIE);
+#endif
+#else
   mcpSpiWaitDone();
   SPDR = (data & 0xff);
   mcpSpiWaitDone();
   mcpDacCsHigh();
-#endif
+#endif // USE_SPI_INTERRUPT
+
+#endif // USE_HW_SPI
 }
 
 inline void mcpDac2ASend(uint16_t data) {
