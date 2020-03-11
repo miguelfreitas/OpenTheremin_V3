@@ -27,12 +27,12 @@
 #include "OTPinDefs.h"
 
 // use atmel hardware SPI instead of software bitbanging
-#define USE_HW_SPI
+#define USE_HW_SPI 1
 // use interrupt for sending 8 bits LSB + deasserting CS
-#define USE_SPI_INTERRUPT
+#define USE_SPI_INTERRUPT 1
 // fake SPI interrupt => must call mcpSpiFirstInt() and mcpSpiSecondInt() explicitely.
 // (avoids interrupt overhead but requires calling things at the right places - hackish!)
-//#define USE_SPI_FAKE_INT
+#define USE_SPI_FAKE_INT 0
 
 //------------------------------------------------------------------------------
 #define mcpDacCsLow() MCP_DAC_CS_PORT &= ~_BV(MCP_DAC_CS_BIT)
@@ -41,7 +41,7 @@
 #define mcpDac2CsLow() MCP_DAC_CS_PORT &= ~_BV(MCP_DAC2_CS_BIT)
 #define mcpDac2CsHigh() MCP_DAC_CS_PORT |= _BV(MCP_DAC2_CS_BIT)
 
-#ifndef USE_HW_SPI
+#if !USE_HW_SPI
   #define mcpDacSckLow() MCP_DAC_SCK_PORT &= ~_BV(MCP_DAC_SCK_BIT)
   #define mcpDacSckHigh() MCP_DAC_SCK_PORT |= _BV(MCP_DAC_SCK_BIT)
   #define mcpDacSckPulse() {mcpDacSckHigh();mcpDacSckLow();}
@@ -52,15 +52,15 @@
 
   // send bit b of d
   #define mcpDacSendBit(d, b) {mcpDacSdiSet(d&_BV(b));mcpDacSckPulse();}
-#endif
+#endif // !USE_HW_SPI
 
-#ifdef USE_MCP_DAC_LDAC
+#if USE_MCP_DAC_LDAC
   #define mcpDacLatchLow() MCP_DAC_LDAC_PORT &= ~_BV(MCP_DAC_LDAC_BIT)
   #define mcpDacLatchHigh() MCP_DAC_LDAC_PORT |= _BV(MCP_DAC_LDAC_BIT)
 #else
   #define mcpDacLatchLow()
   #define mcpDacLatchHigh()
-#endif
+#endif // USE_MCP_DAC_LDAC
 #define mcpDacLatchPulse() {mcpDacLatchLow();mcpDacLatchHigh();}
 
 //------------------------------------------------------------------------------
@@ -82,23 +82,30 @@ inline void mcpDacInit(void) {
   MCP_DAC_LDAC_PORT &= ~_BV(MCP_DAC_LDAC_BIT);
 #endif // USE_MCP_DAC_LDAC
 
-#ifdef USE_HW_SPI
+#if USE_HW_SPI
   /* Enable SPI, Master, set clock rate fck/4 */
   SPCR = (1<<SPE)|(1<<MSTR);
   SPSR = 0;
-#endif
+#endif //USE_HW_SPI
 }
 
-#ifdef USE_HW_SPI
+#if USE_HW_SPI
 inline void mcpSpiWaitDone(void) {
   while(!(SPSR & (1<<SPIF)))
     ;
 }
 extern uint8_t _mcpDacLSB;
 extern bool _mcpHasDacLSB;
+
+/* These are the operations to perform upon SPI transfer completion interrupt:
+ *  first interrupt: sends the remaining 8 bits LSB
+ *  second interrupt: deasserts CS
+ * These macro are provided here as the may be called explicitely, that is,
+ * without interruptions, when USE_SPI_FAKE_INT == 1.
+ */
 #define mcpSpiFirstInt() SPDR = _mcpDacLSB
 #define mcpSpiSecondInt() mcpDacCsHigh()
-#endif
+#endif //USE_HW_SPI
 
 //------------------------------------------------------------------------------
 // send 12 bits to dac
@@ -107,7 +114,7 @@ extern bool _mcpHasDacLSB;
 inline void mcpDacSend(uint16_t data) {
   mcpDacCsLow();
 
-#ifndef USE_HW_SPI
+#if !USE_HW_SPI
   // send DAC config bits
   mcpDacSdiLow();
   mcpDacSckPulse();  // DAC A
@@ -130,31 +137,30 @@ inline void mcpDacSend(uint16_t data) {
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
   mcpDacCsHigh();
-#else // !USE_HW_SPI
-
-#ifdef USE_SPI_INTERRUPT
+#else // USE_HW_SPI
+ #if USE_SPI_INTERRUPT
   // load data LSB to buffer so it will be sent from SPI interrupt
   _mcpDacLSB = (data & 0xff);
-#ifndef USE_SPI_FAKE_INT
+  #if !USE_SPI_FAKE_INT
   _mcpHasDacLSB = 1;
-#endif // USE_SPI_FAKE_INT
-#endif // USE_SPI_INTERRUPT
+  #endif // !USE_SPI_FAKE_INT
+ #endif // USE_SPI_INTERRUPT
 
-  // keep 4 bits (11 to 8) of the MSB
+  // send 4 bits (11 to 8) of the MSB
   // set buffered REF (14), 1x gain (13), no SHDN (12)
   SPSR; // reads SPSR to clear SPIF with next SPDR write
   SPDR = ((data >> 8) & 0x0f) | 0x70;
 
-#ifdef USE_SPI_INTERRUPT
-#ifndef USE_SPI_FAKE_INT
+ #if USE_SPI_INTERRUPT
+  #if !USE_SPI_FAKE_INT
   SPCR |= (1<<SPIE);
-#endif
-#else
+  #endif
+ #else // !USE_SPI_INTERRUPT
   mcpSpiWaitDone();
   SPDR = (data & 0xff);
   mcpSpiWaitDone();
   mcpDacCsHigh();
-#endif // USE_SPI_INTERRUPT
+ #endif // USE_SPI_INTERRUPT
 
 #endif // USE_HW_SPI
 }
@@ -162,7 +168,7 @@ inline void mcpDacSend(uint16_t data) {
 inline void mcpDac2ASend(uint16_t data) {
   mcpDac2CsLow();
 
-#ifndef USE_HW_SPI
+#if !USE_HW_SPI
   // send DAC config bits
   mcpDacSdiLow();
   mcpDacSckPulse();  // DAC A
@@ -184,14 +190,14 @@ inline void mcpDac2ASend(uint16_t data) {
   mcpDacSendBit(data,  2);
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
-#else
+#else // USE_HW_SPI
   // keep 4 bits (11 to 8) of the MSB
   // set buffered DAC=0 (15), REF (14), 1x gain (13), no SHDN (12)
   SPDR = ((data >> 8) & 0x0f) | 0x70;
   mcpSpiWaitDone();
   SPDR = (data & 0xff);
   mcpSpiWaitDone();
-#endif
+#endif // USE_HW_SPI
 
   mcpDac2CsHigh();
 }
@@ -199,7 +205,7 @@ inline void mcpDac2ASend(uint16_t data) {
 inline void mcpDac2BSend(uint16_t data) {
   mcpDac2CsLow();
 
-#ifndef USE_HW_SPI
+#if !USE_HW_SPI
   // send DAC config bits
   mcpDacSdiHigh();
   mcpDacSckPulse();  // DAC B
@@ -221,18 +227,16 @@ inline void mcpDac2BSend(uint16_t data) {
   mcpDacSendBit(data,  2);
   mcpDacSendBit(data,  1);
   mcpDacSendBit(data,  0);
-#else
+#else // USE_HW_SPI
   // keep 4 bits (11 to 8) of the MSB
   // set buffered DAC=1 (15), REF (14), 1x gain (13), no SHDN (12)
   SPDR = ((data >> 8) & 0x0f) | 0xf0;
   mcpSpiWaitDone();
   SPDR = (data & 0xff);
   mcpSpiWaitDone();
-#endif
+#endif // USE_HW_SPI
 
   mcpDac2CsHigh();
 }
-
-
 
 #endif //mcpDac_h
