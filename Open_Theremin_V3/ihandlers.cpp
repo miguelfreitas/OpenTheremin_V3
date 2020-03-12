@@ -15,7 +15,7 @@
 #include "theremin_sintable7.c"
 #include "theremin_sintable8.c"
 
-const int16_t* const wavetables[] PROGMEM = {
+const int16_t* const wavetables[] = {
   sine_table,
   sine_table2,
   sine_table3,
@@ -135,20 +135,8 @@ ISR (INT1_vect) {
 
 #else   //Play sound
 
-  // Read next wave table value (3.0us)
-  // The slightly odd tactic here is to provide compile-time expressions for the wavetable
-  // positions. Making addr1 the index into the wavtables array breaks the time limit for
-  // the interrupt handler
-  switch (vWavetableSelector) {
-    case 1:  waveSample = (int16_t) pgm_read_word_near(wavetables[1] + offset); break;
-    case 2:  waveSample = (int16_t) pgm_read_word_near(wavetables[2] + offset); break;
-    case 3:  waveSample = (int16_t) pgm_read_word_near(wavetables[3] + offset); break;
-    case 4:  waveSample = (int16_t) pgm_read_word_near(wavetables[4] + offset); break;
-    case 5:  waveSample = (int16_t) pgm_read_word_near(wavetables[5] + offset); break;
-    case 6:  waveSample = (int16_t) pgm_read_word_near(wavetables[6] + offset); break;
-    case 7:  waveSample = (int16_t) pgm_read_word_near(wavetables[7] + offset); break;
-    default: waveSample = (int16_t) pgm_read_word_near(wavetables[0] + offset); break;
-  };
+  // Read next wave table value (1.5us)
+  waveSample = (int16_t) pgm_read_word_near((wavetables[vWavetableSelector]) + offset);
 
   if (waveSample > 0) {                   // multiply 16 bit wave number by 8 bit volume value (11.2us / 5.4us)
     scaledSample = MCP_DAC_BASE + (mul_16_8(waveSample, vScaledVolume) >> 8);
