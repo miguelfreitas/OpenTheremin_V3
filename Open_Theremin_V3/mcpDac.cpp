@@ -2,6 +2,7 @@
 
 #include "mcpDac.h"
 
+#if USE_HW_SPI
 uint8_t _mcpDacLSB;
 bool _mcpHasDacLSB;
 
@@ -36,3 +37,4 @@ ISR (SPI_STC_vect) {
     SPCR &= ~(1<<SPIE);
   }
 }
+#endif // USE_HW_SPI
