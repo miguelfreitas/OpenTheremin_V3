@@ -32,7 +32,7 @@
 #define USE_SPI_INTERRUPT 1
 // fake SPI interrupt => must call mcpSpiFirstInt() and mcpSpiSecondInt() explicitely.
 // (avoids interrupt overhead but requires calling things at the right places - hackish!)
-#define USE_SPI_FAKE_INT 0
+#define USE_SPI_FAKE_INT 1
 
 //------------------------------------------------------------------------------
 #define mcpDacCsLow() MCP_DAC_CS_PORT &= ~_BV(MCP_DAC_CS_BIT)

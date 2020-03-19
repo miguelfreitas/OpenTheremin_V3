@@ -59,6 +59,7 @@ class Application {
     const float MIDDLE_C = 261.6;
 
     void playNote(float hz, uint16_t milliseconds, uint8_t volume);
+    void setWavetableSampleAdvance(uint16_t val);
     void hzToAddVal(float hz);
     void playStartupSound();
     void playCalibratingCountdownSound();

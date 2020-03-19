@@ -5,26 +5,9 @@
 #include "timer.h"
 
 #include "build.h"
+#include "wavetables.h"
 
-#include "theremin_sintable.c"
-#include "theremin_sintable2.c"
-#include "theremin_sintable3.c"
-#include "theremin_sintable4.c"
-#include "theremin_sintable5.c"
-#include "theremin_sintable6.c"
-#include "theremin_sintable7.c"
-#include "theremin_sintable8.c"
-
-const int16_t* const wavetables[] = {
-  sine_table,
-  sine_table2,
-  sine_table3,
-  sine_table4,
-  sine_table5,
-  sine_table6,
-  sine_table7,
-  sine_table8
-};
+#include "simulavr_debug.h"
 
 static const uint32_t MCP_DAC_BASE = 2047;
 
@@ -32,7 +15,10 @@ static const uint32_t MCP_DAC_BASE = 2047;
 #define PC_STATE      (PINB & (1<<PORTB0))
 
 uint8_t  vScaledVolume = 0;
-uint16_t vPointerIncrement = 0;
+uint16_t vPointerIncrement1 = 0;
+uint16_t vPointerIncrement2 = 0;
+uint16_t vPointerIncrement3 = 0;
+uint16_t vPointerIncrement4 = 0;
 
 volatile uint16_t pitch = 0;            // Pitch value
 volatile uint16_t pitch_counter = 0;    // Pitch counter
@@ -49,9 +35,12 @@ volatile uint16_t vol_counter_l;         // Last value of volume counter
 
 volatile uint16_t timer_overflow_counter;         // counter for frequency measurement
 
-uint8_t vWavetableSelector = 0;  // wavetable selector
+uint16_t curWavetableBase = sine_table;
 
-static uint16_t pointer       = 0;  // Table pointer
+static uint16_t pointer1       = 0;  // Table pointer
+static uint16_t pointer2       = 0;  // Table pointer
+static uint16_t pointer3       = 0;  // Table pointer
+static uint16_t pointer4       = 0;  // Table pointer
 static volatile uint8_t  debounce_p, debounce_v  = 0;  // Counters for debouncing
 
 void ihInitialiseTimer() {
@@ -121,32 +110,68 @@ static inline uint32_t mul_16_8(uint16_t a, uint8_t b)
 ISR (INT1_vect) {
   // Interrupt takes up a total of max 25 us
 
+  // latch previous word to DAC output
+  mcpDacLatchPulse();
+
   disableInt1(); // Disable External Interrupt INT1 to avoid recursive interrupts
   // Enable Interrupts to allow counter 1 interrupts
   interrupts();
 
-  int16_t  waveSample;
-  uint32_t scaledSample;
-  uint16_t offset = (uint16_t)(pointer>>6) & 0x3ff;
+  int16_t waveSample;
+  static int16_t scaledSample = 0;
 
 #if CV_ENABLED                                 // Generator for CV output
 
  mcpDacSend(min(vPointerIncrement, 4095));        //Send result to Digital to Analogue Converter (audio out) (9.6 us)
 
 #else   //Play sound
+  //Send (previous) scaledSample to Digital to Analogue Converter (audio out)
+  //0.7us USE_HW_SPI=1, USE_SPI_INTERRUPT=1, USE_SPI_FAKE_INT=1
+  //5.6us USE_HW_SPI=1, USE_SPI_INTERRUPT=0, USE_SPI_FAKE_INT=0
+  //8.0us USE_HW_SPI=0, USE_SPI_INTERRUPT=0, USE_SPI_FAKE_INT=0
+  mcpDacSend(scaledSample + MCP_DAC_BASE);
+  simulavr_printhex(scaledSample, 16, "0x", "\n");
 
-  // Read next wave table value (1.5us)
-  waveSample = (int16_t) pgm_read_word_near((wavetables[vWavetableSelector]) + offset);
+  // Read next wave table value (2.7us each)
+  // Note: (pointer1>>5) & 0x7fe) is 0.3us faster than ((pointer1>>6) * 2 bytes per <uint16 *>)
+  //       (pointer1>>5) & 0xfffe) is 0.07us faster than (pointer1>>5) & 0x7fe) => ok as shift right unsigned fills with zeros
+  waveSample = (int16_t) pgm_read_word_near(curWavetableBase + ((pointer1>>5) & 0xfffe)); // 2.7us
+  waveSample += (int16_t) pgm_read_word_near(curWavetableBase + ((pointer2>>5) & 0xfffe)); // 2.7us
 
-  if (waveSample > 0) {                   // multiply 16 bit wave number by 8 bit volume value (11.2us / 5.4us)
-    scaledSample = MCP_DAC_BASE + (mul_16_8(waveSample, vScaledVolume) >> 8);
+#if USE_SPI_FAKE_INT
+  // warning: we have not checks here, must ensure the transfer completed already!
+  mcpSpiFirstInt();
+#endif
+
+  // Read next wave table value (2.7us each)
+  waveSample += (int16_t) pgm_read_word_near(curWavetableBase + ((pointer3>>5) & 0xfffe));
+  waveSample += (int16_t) pgm_read_word_near(curWavetableBase + ((pointer4>>5) & 0xfffe));
+  waveSample = waveSample / 4; // (0.5us)
+
+  //simulavr_printhex(waveSample, 16, "0x", " * ");
+  //simulavr_printhex(vScaledVolume, 8, "0x", " = ");
+  if (waveSample > 0) {                   // multiply 16 bit wave number by 8 bit volume value (1.6us / 2.3us)
+    scaledSample = (mul_16_8(waveSample, vScaledVolume) >> 8);
   } else {
-    scaledSample = MCP_DAC_BASE - (mul_16_8(-waveSample, vScaledVolume) >> 8);
+    scaledSample = -(mul_16_8(-waveSample, vScaledVolume) >> 8);
   }
+  //simulavr_printhex(scaledSample, 16, "0x", "\n");
 
-  mcpDacSend(scaledSample);        //Send result to Digital to Analogue Converter (audio out) (9.6 us)
+#if USE_SPI_FAKE_INT
+  // warning: we have not checks here, must ensure the transfer completed already!
+  mcpSpiSecondInt();
+#endif
 
-  pointer = pointer + vPointerIncrement;    // increment table pointer (ca. 2us)
+  //simulavr_printhex(vPointerIncrement1, 16, "0x", " ");
+  //simulavr_printhex(vPointerIncrement2, 16, "0x", " ");
+  //simulavr_printhex(vPointerIncrement3, 16, "0x", " ");
+  //simulavr_printhex(vPointerIncrement4, 16, "0x", "\n");
+  
+  // increment table pointer (1us each)
+  pointer1 += vPointerIncrement1;
+  pointer2 += vPointerIncrement2;
+  pointer3 += vPointerIncrement3;
+  pointer4 += vPointerIncrement4;
 
 #endif                          //CV play sound
   incrementTimer();               // update 32us timer

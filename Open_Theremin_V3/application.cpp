@@ -1,5 +1,7 @@
 #include "Arduino.h"
 
+#define APPLICATION_CPP
+
 #include "application.h"
 
 #include "hw.h"
@@ -7,6 +9,7 @@
 #include "ihandlers.h"
 #include "timer.h"
 #include "EEPROM.h"
+#include "wavetables.h"
 
 const AppMode AppModeValues[] = {MUTE,NORMAL};
 const int16_t CalibrationTolerance = 15;
@@ -23,6 +26,8 @@ static int16_t volumeDAC = 0;
 static float qMeasurement = 0;
 
 static int32_t volCalibrationBase   = 0;
+
+static uint8_t vWavetableSelector = 0;  // wavetable selector
 
 Application::Application()
   : _state(PLAYING),
@@ -176,9 +181,12 @@ void Application::loop() {
   wavePotValue = analogRead(WAVE_SELECT_POT);
   
   if ((registerPotValue-registerPotValueL) >= HYST_VAL || (registerPotValueL-registerPotValue) >= HYST_VAL) registerPotValueL=registerPotValue;
-  if (((wavePotValue-wavePotValueL) >= HYST_VAL) || ((wavePotValueL-wavePotValue) >= HYST_VAL)) wavePotValueL=wavePotValue;
+  if (((wavePotValue-wavePotValueL) >= HYST_VAL) || ((wavePotValueL-wavePotValue) >= HYST_VAL)) {
+    wavePotValueL=wavePotValue;
+    vWavetableSelector=(wavePotValueL>>7) & 0x7;
+    curWavetableBase = wavetables[vWavetableSelector];
+  }
 
-  vWavetableSelector=wavePotValueL>>7;
   registerValue=4-(registerPotValueL>>8);  
 
   if (_state == PLAYING && HW_BUTTON_PRESSED) {
@@ -477,6 +485,35 @@ EEPROM.put(2,volumeXn0);
   Serial.println("\nCALIBRATION COMPTLETED\n");
 }
 
+void Application::setWavetableSampleAdvance(uint16_t val) {
+  uint16_t n, d;
+  uint32_t incVal;
+  uint8_t i;
+
+  for( i = 0; i < 4; i++) {
+    n = chordtables[vWavetableSelector][2*i];
+    d = chordtables[vWavetableSelector][2*i+1];
+    incVal = (((uint32_t)val) * n / d);
+    if( incVal >= 0x10000 ) {
+      incVal = 0;
+    }
+    switch(i) {
+      case 0:
+        vPointerIncrement1 = incVal;
+        break;
+      case 1:
+        vPointerIncrement2 = incVal;
+        break;
+      case 2:
+        vPointerIncrement3 = incVal;
+        break;
+      case 3:
+        vPointerIncrement4 = incVal;
+        break;
+    }
+  }
+}
+
 void Application::hzToAddVal(float hz) {
   setWavetableSampleAdvance((uint16_t)(hz * HZ_ADDVAL_FACTOR));
 }
@@ -512,7 +549,3 @@ void Application::delay_NOP(unsigned long time) {
       __asm__ __volatile__ ("nop");
   }
 }
-
-
-
-
