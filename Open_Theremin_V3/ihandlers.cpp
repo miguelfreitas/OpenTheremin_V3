@@ -14,7 +14,7 @@ static const uint32_t MCP_DAC_BASE = 2047;
 #define INT0_STATE    (PIND & (1<<PORTD2))
 #define PC_STATE      (PINB & (1<<PORTB0))
 
-uint8_t  vScaledVolume = 0;
+volatile uint8_t  vScaledVolume = 0;
 uint16_t vPointerIncrement1 = 0;
 uint16_t vPointerIncrement2 = 0;
 uint16_t vPointerIncrement3 = 0;
