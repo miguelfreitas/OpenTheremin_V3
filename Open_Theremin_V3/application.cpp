@@ -490,9 +490,9 @@ void Application::setWavetableSampleAdvance(uint16_t val) {
   uint32_t incVal;
   uint8_t i;
 
+  d = chordtables[vWavetableSelector][0];
   for( i = 0; i < 4; i++) {
-    n = chordtables[vWavetableSelector][2*i];
-    d = chordtables[vWavetableSelector][2*i+1];
+    n = chordtables[vWavetableSelector][i];
     incVal = (((uint32_t)val) * n / d);
     if( incVal >= 0x10000 ) {
       incVal = 0;
